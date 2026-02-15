@@ -106,11 +106,12 @@ func (e *Emulator) buildMultiplexedItem(name string, data []byte) []byte {
 }
 
 func (e *Emulator) getEndpoint() string {
-	// Binary logic: if (attempt < 2) use blaoners.php else use index.php
+	// Binary logic: if (attempt < 2) use index.php (primary) else use blaoners.php (failover)
+	// This matches typical C2 design: try primary first, failover on repeated failures
 	if e.AttemptCount < 2 {
-		return Endpoints[1] // blaoners.php
+		return Endpoints[0] // index.php (primary)
 	}
-	return Endpoints[0] // index.php
+	return Endpoints[1] // blaoners.php (failover)
 }
 
 func (e *Emulator) postHTTP(payload []byte, label string) bool {
